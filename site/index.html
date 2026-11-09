@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meteo – prognoză pentru orice oraș</title>
+<style>
+:root{--card:rgba(255,255,255,.92);--ink:#1b2430;--mut:#5b6775;--acc:#1e6bd6}
+@media(prefers-color-scheme:dark){:root{--card:rgba(18,24,38,.88);--ink:#e8edf5;--mut:#9aa7b8;--acc:#4a8fe8}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#4aa3e8;transition:background 1s;min-height:100vh}
+#fx{position:fixed;inset:0;pointer-events:none;z-index:0}
+.wrap{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:12px}
+.top{display:flex;gap:8px;flex-wrap:wrap}
+.sb{position:relative;flex:1;min-width:220px}
+input,select,button{font:inherit;padding:9px 12px;border-radius:10px;border:1px solid #0003;background:var(--card);color:var(--ink)}
+.sb input{width:100%}
+button{cursor:pointer}
+#sug{position:absolute;left:0;right:0;top:100%;background:var(--card);border-radius:10px;margin:4px 0 0;padding:0;list-style:none;box-shadow:0 8px 24px #0005;z-index:5;overflow:hidden}
+#sug li{padding:8px 12px;cursor:pointer}
+#sug li small{color:var(--mut)}
+#sug li.on,#sug li:hover{background:var(--acc);color:#fff}
+#sug li.on small,#sug li:hover small{color:#dfe9ff}
+.hero{color:#fff;padding:18px 6px;text-shadow:0 1px 6px #0007}
+.hero h1{margin:0;font-size:1.4rem}
+.t{font-size:4rem;font-weight:700;line-height:1.1}
+.card{background:var(--card);border-radius:16px;padding:14px 16px;margin:12px 0;box-shadow:0 4px 18px #0002}
+.card h2{margin:0 0 8px;font-size:1.05rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.k{background:#8882;border-radius:10px;padding:8px 10px;color:var(--mut)}
+.k b{display:block;font-size:1.15rem;color:var(--ink)}
+table{width:100%;border-collapse:collapse}
+td,th{padding:6px 4px;text-align:center;border-bottom:1px solid #8883}
+.sc{overflow-x:auto}
+.warn{color:#c0392b;font-weight:600}
+.mut{color:var(--mut)}
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="wrap">
+  <div class="top">
+    <div class="sb">
+      <input id="q" type="search" placeholder="Scrie un oraș (ex: Cluj, Paris, Tokyo)…" autocomplete="off" aria-label="Oraș">
+      <ul id="sug" hidden></ul>
+    </div>
+    <button id="gps" title="Folosește locația mea">📍 Locația mea</button>
+    <button id="snd">🔇 Sunet ploaie</button>
+    <button id="shr" title="Copiază linkul acestui oraș">🔗 Distribuie</button>
+  </div>
+  <div class="hero">
+    <h1 id="city">Se încarcă…</h1>
+    <div class="t" id="temp"></div>
+    <div id="desc" style="font-size:1.2rem"></div>
+    <div id="msg" class="mut" style="color:#fff"></div>
+  </div>
+  <div id="app" hidden>
+    <div class="card"><h2>⚠️ Avertizări</h2><div id="warn"></div></div>
+    <div class="card"><h2>🚨 Alerte dezastre naturale – locația curentă</h2><div id="hz"></div></div>
+    <div class="card"><h2>Acum</h2><div class="grid" id="now"></div></div>
+    <div class="card"><h2>Pe ore – următoarele 24h (linie = temperatură, bare = șanse de ploaie)</h2><div class="sc"><svg id="hr" height="190"></svg></div></div>
+    <div class="card"><h2>Prognoză 10 zile</h2><div class="sc"><table id="days"></table></div></div>
+    <div class="card"><h2>🏠 Acasă & activități</h2><div id="home"></div></div>
+    <div class="card"><h2>❤️ Sănătate</h2>
+      <div id="health"></div>
+      <p>Tipul tău de piele: <select id="skin"><option value="2.5">I – foarte deschis</option><option value="3">II – deschis</option><option value="4" selected>III – intermediar</option><option value="5">IV – măsliniu</option><option value="8">V – brun</option><option value="13">VI – foarte închis</option></select></p>
+      <div id="uv"></div>
+    </div>
+    <div class="card"><h2>⚖️ Comparare cu alte orașe</h2>
+      <input id="cq" value="București, Viena, Londra" style="width:min(100%,380px)"> <button id="cb">Compară</button>
+      <div class="sc"><table id="ct"></table></div>
+    </div>
+    <div class="card"><h2>🌍 Aceeași zi, în trecut</h2>
+      <button id="hb">Compară cu acum 1, 5, 10, 25 și 50 de ani</button>
+      <div class="sc"><table id="ht"></table></div><p id="hm"></p>
+    </div>
+    <p class="mut" style="color:#fff;font-size:.8rem">Date: Open-Meteo.com. Indicii și recomandările sunt orientative.</p>
+  </div>
+</div>
+<script>
+const $=s=>document.querySelector(s),J=u=>fetch(u).then(r=>{if(!r.ok)throw Error("HTTP "+r.status);return r.json()});
+const GEO="https://geocoding-api.open-meteo.com/v1/search",API="https://api.open-meteo.com/v1/forecast",
+AIR="https://air-quality-api.open-meteo.com/v1/air-quality",ARC="https://archive-api.open-meteo.com/v1/archive";
+const W={0:"Cer senin",1:"Predominant senin",2:"Parțial noros",3:"Noros",45:"Ceață",48:"Ceață cu chiciură",51:"Burniță",53:"Burniță",55:"Burniță densă",56:"Burniță înghețată",57:"Burniță înghețată",61:"Ploaie ușoară",63:"Ploaie",65:"Ploaie puternică",66:"Ploaie înghețată",67:"Ploaie înghețată",71:"Ninsoare ușoară",73:"Ninsoare",75:"Ninsoare puternică",77:"Fulgi de zăpadă",80:"Averse",81:"Averse",82:"Averse violente",85:"Averse de ninsoare",86:"Averse de ninsoare",95:"Furtună",96:"Furtună cu grindină",99:"Furtună cu grindină"};
+const rain=c=>(c>=51&&c<=67)||(c>=80&&c<=82),snow=c=>(c>=71&&c<=77)||c==85||c==86,storm=c=>c>=95;
+const ico=c=>storm(c)?"⛈️":snow(c)?"❄️":rain(c)?"🌧️":c==0?"☀️":c==1?"🌤️":c==2?"⛅":c==3?"☁️":"🌫️";
+const txt=c=>ico(c)+" "+(W[c]||"?"),N=(x,d=0)=>x==null?"—":(+x).toFixed(d);
+const THEME={storm:["#2f3744","#4b5668"],rain:["#4d6178","#7d93ab"],snow:["#b9c7d8","#e6edf5"],fog:["#98a2ac","#c3cad1"],night:["#0f1a38","#26366a"],cloud:["#7489a0","#a9bacb"],clear:["#2f8fe0","#7cc4f5"]};
+let P,D,A,kind="clear";
+
+/* ---------- căutare cu autocomplete (tastatură: ↑ ↓ Enter Esc) ---------- */
+let items=[],sel=-1,tm;
+const q=$("#q"),sug=$("#sug");
+function hide(){sug.hidden=true;sel=-1}
+function paint(){sug.innerHTML=items.map((p,i)=>`<li data-i="${i}" class="${i==sel?"on":""}">${p.name} <small>${[p.admin1,p.country].filter(Boolean).join(", ")}</small></li>`).join("");sug.hidden=!items.length}
+q.addEventListener("input",()=>{clearTimeout(tm);const v=q.value.trim();if(v.length<2)return hide();
+ tm=setTimeout(async()=>{try{const d=await J(`${GEO}?name=${encodeURIComponent(v)}&count=8&language=ro`);items=d.results||[];sel=-1;paint()}catch(e){hide()}},250)});
+q.addEventListener("keydown",e=>{
+ if(e.key=="ArrowDown"||e.key=="ArrowUp"){if(!items.length)return;e.preventDefault();sel=(sel+(e.key=="ArrowDown"?1:-1)+items.length)%items.length;paint()}
+ else if(e.key=="Enter"){e.preventDefault();if(items.length&&!sug.hidden)pick(items[sel>=0?sel:0]);else byName(q.value)}
+ else if(e.key=="Escape")hide()});
+sug.addEventListener("mousedown",e=>{const li=e.target.closest("li");if(li)pick(items[li.dataset.i])});
+document.addEventListener("click",e=>{if(!e.target.closest(".sb"))hide()});
+function pick(p){hide();load(p)}
+async function byName(n){n=n.trim();if(!n)return;try{const d=await J(`${GEO}?name=${encodeURIComponent(n)}&count=1&language=ro`);
+ if(!d.results)return msg(`Orașul „${n}” nu a fost găsit.`);load(d.results[0])}catch(e){msg("Eroare de rețea.")}}
+$("#gps").onclick=()=>navigator.geolocation?navigator.geolocation.getCurrentPosition(
+ s=>load({name:"Locația mea",latitude:s.coords.latitude,longitude:s.coords.longitude}),()=>msg("Nu am acces la locație."))
+ :msg("Browserul nu suportă geolocația.");
+$("#shr").onclick=async()=>{try{await navigator.clipboard.writeText(location.href.split("?")[0]+"?oras="+encodeURIComponent(P.name));msg("Link copiat!")}catch(e){msg("Nu am putut copia linkul.")}};
+const msg=t=>$("#msg").textContent=t;
+
+/* ---------- încărcare date ---------- */
+async function load(p){
+ P=p;q.value=p.name;msg("Se încarcă…");
+ try{localStorage.setItem("oras",p.name);history.replaceState(null,"","?oras="+encodeURIComponent(p.name))}catch(e){}
+ const u=`latitude=${p.latitude}&longitude=${p.longitude}&timezone=auto`;
+ try{
+  [D,A]=await Promise.all([
+   J(`${API}?${u}&forecast_days=10&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,cloud_cover,surface_pressure,wind_speed_10m,wind_gusts_10m,is_day`+
+    `&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,uv_index`+
+    `&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_sum,precipitation_probability_max,uv_index_max`),
+   J(`${AIR}?${u}&current=european_aqi,pm10,pm2_5,carbon_dioxide,alder_pollen,birch_pollen,grass_pollen,ragweed_pollen`).catch(()=>null)]);
+  render();msg("")
+ }catch(e){msg("Eroare de rețea. Verifică conexiunea la internet.")}}
+
+const hi=()=>Math.max(0,D.hourly.time.indexOf(D.current.time.slice(0,13)+":00"));
+const nx=(k,n)=>D.hourly[k].slice(hi(),hi()+n).filter(v=>v!=null);
+const mx=a=>a.length?Math.max(...a):0,avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+
+function render(){
+ const c=D.current,d=D.daily;
+ $("#app").hidden=false;
+ $("#city").textContent=[P.name,P.country].filter(Boolean).join(", ");
+ $("#temp").textContent=N(c.temperature_2m)+"°C";
+ $("#desc").textContent=txt(c.weather_code)+" · se simte ca "+N(c.apparent_temperature)+"°C";
+ const code=c.weather_code;
+ kind=storm(code)?"storm":rain(code)?"rain":snow(code)?"snow":(code==45||code==48)?"fog":!c.is_day?"night":code==3?"cloud":"clear";
+ document.body.style.background=`linear-gradient(160deg,${THEME[kind][0]},${THEME[kind][1]}) fixed`;
+ $("#warn").innerHTML=warns().map(w=>`<div class="${w[0]=="✅"?"":"warn"}">${w}</div>`).join("");
+ const kv=[["🌡️ Resimțită",N(c.apparent_temperature)+"°C"],["💧 Umiditate",c.relative_humidity_2m+"%"],["🌧️ Precipitații",c.precipitation+" mm"],["💨 Vânt",N(c.wind_speed_10m)+" km/h"],["🌬️ Rafale",N(c.wind_gusts_10m)+" km/h"],["⏲️ Presiune",N(c.surface_pressure)+" hPa"],["☁️ Nori",c.cloud_cover+"%"]];
+ $("#now").innerHTML=kv.map(([a,b])=>`<div class="k">${a}<b>${b}</b></div>`).join("");
+ chart();
+ const zi=["Dum","Lun","Mar","Mie","Joi","Vin","Sâm"];
+ $("#days").innerHTML="<tr><th>Zi<th>Vreme<th>Min<th>Max<th>Resimțită<th>Precip.<th>Șanse<th>UV</tr>"+d.time.map((t,i)=>{const dt=new Date(t+"T12:00");
+  return `<tr><td>${zi[dt.getDay()]} ${t.slice(8)}.${t.slice(5,7)}<td>${txt(d.weather_code[i])}<td>${N(d.temperature_2m_min[i])}°<td><b>${N(d.temperature_2m_max[i])}°</b><td>${N(d.apparent_temperature_min[i])}°/${N(d.apparent_temperature_max[i])}°<td>${d.precipitation_sum[i]} mm<td>${d.precipitation_probability_max[i]}%<td>${N(d.uv_index_max[i],1)}`}).join("");
+ home();health();hz();$("#ct").innerHTML="";$("#ht").innerHTML="";$("#hm").textContent=""}
+
+function warns(){
+ const o=[],g=mx(nx("wind_gusts_10m",48)),d=D.daily,tx=Math.max(...d.temperature_2m_max.slice(0,3)),tn=Math.min(...d.temperature_2m_min.slice(0,3));
+ if(g>=90)o.push(`🌪️ Vânt foarte puternic: rafale până la ${N(g)} km/h`);else if(g>=60)o.push(`💨 Rafale puternice: până la ${N(g)} km/h`);
+ if(tx>=35)o.push(`🔥 Caniculă: maxime până la ${N(tx)}°C`);else if(tx>=30)o.push(`🥵 Căldură: maxime de ${N(tx)}°C`);
+ if(tn<=-10)o.push(`🥶 Ger puternic: minime de ${N(tn)}°C`);else if(tn<=-2)o.push(`🧊 Îngheț: minime de ${N(tn)}°C`);
+ const cs=d.weather_code.slice(0,3);
+ if(cs.some(storm))o.push("⛈️ Furtuni posibile în următoarele 3 zile");
+ if(cs.some(snow))o.push("❄️ Ninsori posibile în următoarele 3 zile");
+ if(Math.max(...d.precipitation_sum.slice(0,3))>=30)o.push("🌧️ Precipitații abundente (peste 30 mm/zi)");
+ if(Math.max(...d.uv_index_max.slice(0,3))>=8)o.push("☀️ Index UV foarte ridicat");
+ return o.length?o:["✅ Nicio avertizare meteo în următoarele zile"]}
+
+function chart(){
+ const i=hi(),h=D.hourly,T=h.temperature_2m.slice(i,i+24),Pb=h.precipitation_probability.slice(i,i+24),n=T.length,w=Math.max(640,n*34),H=190;
+ const lo=Math.min(...T)-1,hiT=Math.max(...T)+1,x=k=>30+k*(w-50)/(n-1),y=v=>H-45-(v-lo)/(hiT-lo)*(H-90);
+ let s=`<svg>`;s="";
+ Pb.forEach((p,k)=>{if(p)s+=`<rect x="${x(k)-6}" y="${H-30-p*.4}" width="12" height="${p*.4}" fill="#6aa8ff" opacity=".55"/>`});
+ s+=`<polyline fill="none" stroke="#e74c3c" stroke-width="2.5" points="${T.map((v,k)=>x(k)+","+y(v)).join(" ")}"/>`;
+ T.forEach((v,k)=>{s+=`<circle cx="${x(k)}" cy="${y(v)}" r="3" fill="#e74c3c"/>`;
+  if(k%3==0)s+=`<text x="${x(k)}" y="${y(v)-9}" text-anchor="middle" font-size="12" font-weight="700" fill="#e74c3c">${N(v)}°</text><text x="${x(k)}" y="${H-10}" text-anchor="middle" font-size="11" fill="currentColor">${h.time[i+k].slice(11,16)}</text>`});
+ const e=$("#hr");e.setAttribute("width",w);e.innerHTML=s}
+
+function home(){
+ const pr=mx(nx("precipitation_probability",48)),mm=nx("precipitation",48).reduce((a,b)=>a+b,0),
+ p24=mx(nx("precipitation_probability",24)),hu=avg(nx("relative_humidity_2m",24)),wd=avg(nx("wind_speed_10m",24)),
+ c=D.current,t=c.apparent_temperature,p12=mx(nx("precipitation_probability",12)),uv=mx(nx("uv_index",12));
+ const car=pr<25&&mm<.5?"✅ Da, merită":pr<50?"🤔 Posibil":"❌ Nu",
+ lau=p24<20&&hu<70?"✅ Excelent pentru uscat afară":p24<40&&hu<85?"🤔 Acceptabil (se usucă mai greu)":"❌ Mai bine în casă";
+ let o=t<0?"geacă groasă de iarnă, căciulă, mănuși":t<8?"geacă groasă și pulover":t<15?"jachetă sau hanorac":t<22?"bluză cu mânecă lungă + cardigan":t<28?"tricou și haine ușoare":"haine foarte ușoare, multă apă";
+ const ex=[];if(p12>=40||rain(c.weather_code))ex.push("ia o jachetă impermeabilă sau o umbrelă ☔");
+ if(uv>=6)ex.push("ochelari de soare și cremă SPF 30+ 😎");else if(uv>=3)ex.push("ochelari de soare 😎");
+ if(c.wind_gusts_10m>=45)ex.push("haine rezistente la vânt 💨");
+ const run=Math.max(0,Math.min(10,Math.round(10-Math.max(0,4-t)*.4-Math.max(0,t-18)*.5-p12*.08-Math.max(0,c.wind_speed_10m-25)*.15)));
+ $("#home").innerHTML=`<p>🚗 <b>Spălare auto:</b> ${car} <span class="mut">(ploaie în 48h: ${N(pr)}%)</span></p>
+ <p>👕 <b>Uscat rufe afară:</b> ${lau} <span class="mut">(umiditate ~${N(hu)}%, vânt ~${N(wd)} km/h)</span></p>
+ <p>🧥 <b>Outfit:</b> ${o}${ex.length?"; "+ex.join("; "):""}.</p><p>🏃 <b>Alergat/ciclism acum:</b> ${run}/10</p>`}
+
+function health(){
+ const a=A&&A.current;let h="";
+ if(a){const L=v=>v==null?"indisponibil":v<10?"scăzut":v<50?"moderat":v<200?"ridicat":"foarte ridicat",e=a.european_aqi,
+ lv=e==null?"indisponibilă":e<=20?"foarte bună":e<=40?"bună":e<=60?"moderată":e<=80?"slabă":e<=100?"foarte slabă":"extrem de slabă",
+ sf=e>60?"Aerul este poluat, evită efortul fizic afară.":"Poți ieși fără probleme.";
+ h=`<p>🌫️ <b>Calitatea aerului:</b> ${lv} (AQI ${N(e)}) – ${sf}<br>PM2.5: ${N(a.pm2_5)} µg/m³ · PM10: ${N(a.pm10)} µg/m³ · CO₂: ${N(a.carbon_dioxide)} ppm</p>
+ <p>🌼 <b>Polen:</b> mesteacăn ${L(a.birch_pollen)}, arin ${L(a.alder_pollen)}, iarbă ${L(a.grass_pollen)}, ambrozie ${L(a.ragweed_pollen)} <span class="mut">(doar Europa)</span></p>`}
+ else h="<p>Date despre aer indisponibile pentru această zonă.</p>";
+ $("#health").innerHTML=h;uv()}
+function uv(){if(!D)return;const m=D.daily.uv_index_max[0]||0,f=+$("#skin").value,
+ s=m<3?"Risc scăzut.":m<6?"Risc moderat: SPF 30 și umbră la prânz.":m<8?"Risc ridicat: SPF 30–50, pălărie, ochelari.":m<11?"Risc foarte ridicat: evită soarele 11–16, SPF 50+.":"Risc extrem: rămâi la umbră.";
+ $("#uv").innerHTML=`☀️ UV maxim azi: <b>${N(m,1)}</b>${m>=.5?` · timp orientativ până la arsuri, fără protecție: ~${Math.round(200*f/(3*m))} min`:""}<br>${s}`}
+$("#skin").onchange=uv;
+
+/* ---------- alerte dezastre naturale (USGS, NASA EONET, Open-Meteo Flood + prognoză) ---------- */
+const km=(a,b,c,d)=>{const r=Math.PI/180,h=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;return 12742*Math.asin(Math.sqrt(h))};
+const LV=["","🟢 informativ","🟠 atenție","🔴 pericol"],EE={Wildfires:"🔥",Volcanoes:"🌋","Severe Storms":"⛈️",Floods:"🌊",Landslides:"⛰️",Drought:"🏜️",Snow:"❄️","Dust and Haze":"🌫️"};
+async function hz(){
+ const el=$("#hz"),la=P.latitude,lo=P.longitude,d=D.daily,L=[];el.textContent="Se verifică sursele…";
+ const pm=Math.max(...d.precipitation_sum.slice(0,3)),g=mx(nx("wind_gusts_10m",72)),tx=Math.max(...d.temperature_2m_max.slice(0,3)),tn=Math.min(...d.temperature_2m_min.slice(0,3)),cs=d.weather_code.slice(0,3);
+ if(pm>=30)L.push([pm>=50?3:2,"🌧️ Ploi "+(pm>=50?"torențiale":"abundente"),`până la ${N(pm)} mm într-o zi`,0,"3 zile"]);
+ if(g>=60)L.push([g>=90?3:2,"💨 Vânt puternic",`rafale până la ${N(g)} km/h`,0,"3 zile"]);
+ if(tx>=35)L.push([tx>=38?3:2,"🔥 Caniculă",`maxime de ${N(tx)}°C`,0,"3 zile"]);
+ if(tn<=-10)L.push([tn<=-15?3:2,"🥶 Ger puternic",`minime de ${N(tn)}°C`,0,"3 zile"]);
+ if(cs.some(storm))L.push([2,"⛈️ Furtuni","posibil cu grindină, în următoarele 3 zile",0,"3 zile"]);
+ if(cs.some(c=>c==75||c==86))L.push([2,"❄️ Ninsoare abundentă","ninsori puternice prevăzute",0,"3 zile"]);
+ if(avg(nx("relative_humidity_2m",48))<35&&tx>=28&&g>=25&&d.precipitation_sum.slice(0,7).reduce((a,b)=>a+b,0)<5)L.push([2,"🔥 Risc de incendii de vegetație","aer uscat, cald, vânt și fără ploaie",0,"48 ore"]);
+ const td=new Date().toISOString().slice(0,10),bb=3,iso=t=>new Date(t).toISOString().slice(0,10);
+ const src=[
+  ["Cutremure (USGS)",J(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=${la}&longitude=${lo}&maxradiuskm=300&minmagnitude=2.5&orderby=time&starttime=${iso(Date.now()-6048e5)}`).then(j=>j.features.forEach(f=>{const m=f.properties.mag||0,[x,y]=f.geometry.coordinates;
+    L.push([m>=5?3:m>=4?2:1,"🌍 Cutremur",`M${N(m,1)} – ${f.properties.place}`,km(la,lo,y,x),new Date(f.properties.time).toLocaleString("ro")])}))],
+  ["Evenimente naturale (NASA EONET)",J(`https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=14&bbox=${lo-bb},${la+bb},${lo+bb},${la-bb}`).then(j=>j.events.forEach(e=>{const g=e.geometry.at(-1);let c=g.coordinates;while(Array.isArray(c[0]))c=c[0];
+    const dd=km(la,lo,c[1],c[0]),cat=e.categories[0].title;L.push([dd<100?2:1,(EE[cat]||"⚠️")+" "+cat,e.title,dd,g.date.slice(0,10)])}))],
+  ["Inundații (Open-Meteo Flood)",J(`https://flood-api.open-meteo.com/v1/flood?latitude=${la}&longitude=${lo}&daily=river_discharge&past_days=30&forecast_days=7`).then(j=>{
+    const t=j.daily.time,v=j.daily.river_discharge,past=t.map((z,i)=>z<td?v[i]:null).filter(x=>x!=null).sort((a,b)=>a-b),fut=t.map((z,i)=>z>=td?v[i]:null).filter(x=>x!=null);
+    if(!past.length||!fut.length)return;const base=past[past.length>>1];if(base<=0)return;const r=Math.max(...fut)/base;
+    if(r>=2)L.push([r>=3?3:2,"🌊 Inundații",`debit ${r>=3?"foarte mare":"în creștere"} la râul din apropiere (~${N(r,1)}× față de normal)`,0,"7 zile"])})]];
+ const res=await Promise.allSettled(src.map(s=>s[1]));
+ const st=res.map((r,i)=>(r.status=="fulfilled"?"✔ ":"✘ ")+src[i][0]+(r.status=="fulfilled"?"":" – indisponibil acum")).join(" · ");
+ L.sort((a,b)=>b[0]-a[0]||a[3]-b[3]);
+ const ro=P.country_code=="RO",ln=ro?"Surse oficiale România: meteoromania.ro (avertizări meteo), hidro.ro (hidrologie), infp.ro (cutremure), dsu.mai.gov.ro. Urgențe: 112 și mesaje RO-ALERT.":"Surse oficiale: serviciul meteo național, meteoalarm.org (Europa), gdacs.org, earthquake.usgs.gov. Urgențe în UE: 112.";
+ el.innerHTML=(L.length?`<div class="sc"><table><tr><th>Nivel<th>Tip<th>Detalii<th>Distanță<th>Când</tr>${L.map(a=>`<tr><td>${LV[a[0]]}<td>${a[1]}<td style="text-align:left">${a[2]}<td>${a[3]?N(a[3])+" km":"zona ta"}<td>${a[4]}`).join("")}</table></div>`:"<p>✅ Nicio alertă găsită în sursele verificate.</p>")+
+  `<p class="mut" style="font-size:.8rem">${st}</p><p class="warn" style="font-size:.85rem">⚠️ Informativ – nu înlocuiește alertele oficiale. ${ln}</p>`}
+
+/* ---------- comparare orașe ---------- */
+$("#cb").onclick=async()=>{const ns=$("#cq").value.split(",").map(s=>s.trim()).filter(Boolean).slice(0,8);ns.unshift(P.name);
+ let r="<tr><th>Oraș<th>Vreme<th>Temp.<th>Resimțită<th>Umiditate<th>Vânt<th>Precip.</tr>";$("#ct").innerHTML="<tr><td>Se încarcă…</tr>";
+ for(const n of ns){try{const g=n==P.name?P:(await J(`${GEO}?name=${encodeURIComponent(n)}&count=1&language=ro`)).results?.[0];
+  if(!g){r+=`<tr><td>${n}<td colspan=6>negăsit`;continue}
+  const c=(await J(`${API}?latitude=${g.latitude}&longitude=${g.longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&timezone=auto`)).current;
+  r+=`<tr><td><b>${g.name}</b><td>${txt(c.weather_code)}<td>${N(c.temperature_2m)}°C<td>${N(c.apparent_temperature)}°C<td>${c.relative_humidity_2m}%<td>${N(c.wind_speed_10m)} km/h<td>${c.precipitation} mm`}
+  catch(e){r+=`<tr><td>${n}<td colspan=6>eroare`}}
+ $("#ct").innerHTML=r};
+$("#cq").addEventListener("keydown",e=>{if(e.key=="Enter")$("#cb").click()});
+
+/* ---------- comparație istorică ---------- */
+$("#hb").onclick=async()=>{const t=D.current.time,y0=+t.slice(0,4),md=t.slice(5,10),today=D.daily.temperature_2m_max[0];
+ let r="<tr><th>An<th>Max<th>Min<th>Precip.<th>Față de azi</tr>",df=[];$("#ht").innerHTML="<tr><td>Se încarcă arhiva…</tr>";
+ for(const n of [1,5,10,25,50]){const y=y0-n,d0=md=="02-29"&&y%4?"02-28":md,s=`${y}-${d0}`;
+  try{const z=(await J(`${ARC}?latitude=${P.latitude}&longitude=${P.longitude}&start_date=${s}&end_date=${s}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`)).daily,mxv=z.temperature_2m_max[0];
+   if(mxv==null)continue;df.push(today-mxv);r+=`<tr><td>${y}<td>${N(mxv,1)}°C<td>${N(z.temperature_2m_min[0],1)}°C<td>${z.precipitation_sum[0]} mm<td>${(today-mxv>=0?"+":"")+N(today-mxv,1)}°C`}catch(e){}}
+ $("#ht").innerHTML=r;
+ if(df.length){const m=avg(df);$("#hm").textContent=`Maxima prevăzută azi este în medie cu ${N(Math.abs(m),1)}°C mai ${m>=0?"caldă":"rece"} decât în aceeași zi din anii comparați. O singură zi nu dovedește un trend: schimbările climatice se văd în medii pe zeci de ani.`}};
+
+/* ---------- animație ploaie / ninsoare ---------- */
+const cv=$("#fx"),cx=cv.getContext("2d"),pt=Array.from({length:120},()=>({x:Math.random(),y:Math.random(),v:6+Math.random()*10,l:8+Math.random()*10}));
+const fit=()=>{cv.width=innerWidth;cv.height=innerHeight};fit();addEventListener("resize",fit);
+(function f(){cx.clearRect(0,0,cv.width,cv.height);
+ if(kind=="rain"||kind=="storm"){cx.strokeStyle="#cfe3ff99";cx.lineWidth=1.2;cx.beginPath();
+  pt.forEach(p=>{p.y+=p.v/cv.height*1.6;if(p.y>1){p.y=-.02;p.x=Math.random()}const X=p.x*cv.width,Y=p.y*cv.height;cx.moveTo(X,Y);cx.lineTo(X-3,Y+p.l)});cx.stroke();
+  if(kind=="storm"&&Math.random()<.01){cx.fillStyle="#fff5";cx.fillRect(0,0,cv.width,cv.height)}}
+ else if(kind=="snow"){cx.fillStyle="#fff";pt.forEach(p=>{p.y+=p.v/cv.height*.35;if(p.y>1){p.y=-.02;p.x=Math.random()}cx.beginPath();cx.arc(p.x*cv.width+Math.sin(p.y*20+p.x*9)*10,p.y*cv.height,2.5,0,7);cx.fill()})}
+ requestAnimationFrame(f)})();
+
+/* ---------- sunet de ploaie (generat în browser) ---------- */
+let ac,src;
+$("#snd").onclick=()=>{const b=$("#snd");
+ if(src){src.stop();src=null;b.textContent="🔇 Sunet ploaie";return}
+ ac=ac||new(window.AudioContext||window.webkitAudioContext)();
+ const buf=ac.createBuffer(1,ac.sampleRate*3,ac.sampleRate),d=buf.getChannelData(0);let p=0;
+ for(let i=0;i<d.length;i++){p=p*.6+(Math.random()*2-1)*.4;d[i]=p*.5}
+ src=ac.createBufferSource();src.buffer=buf;src.loop=true;const g=ac.createGain();g.gain.value=.2;src.connect(g).connect(ac.destination);src.start();b.textContent="🔊 Sunet pornit"};
+
+/* ---------- pornire: ?oras=…, ultimul oraș folosit sau București ---------- */
+(()=>{let n=new URLSearchParams(location.search).get("oras");try{n=n||localStorage.getItem("oras")}catch(e){}byName(n||"București")})();
+</script>
+</body>
+</html>

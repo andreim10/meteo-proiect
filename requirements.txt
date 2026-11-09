@@ -1,0 +1,5 @@
+requests
+tkintermapview
+pyttsx3
+# opțional, doar pe Linux/Mac pentru sunetul de ploaie:
+# pygame

@@ -1,0 +1,20 @@
+SITE METEO – cum îl pui online, accesibil de pe ORICE browser (telefon, laptop, alt calculator)
+==================================================================================
+
+Fișierul index.html este un site static: nu are nevoie de server propriu, de Python sau de chei API.
+Datele vin direct din Open-Meteo, în browserul vizitatorului.
+
+Varianta cea mai rapidă (2 minute, gratuit, fără cont):
+  1. Deschide https://app.netlify.com/drop
+  2. Trage folderul "site" (sau doar index.html) în pagină.
+  3. Primești imediat un link public de forma https://nume-ales.netlify.app
+
+Alte variante gratuite:
+  - GitHub Pages: creezi un repository, încarci index.html, la Settings > Pages alegi branch-ul main.
+    Link: https://numele-tau.github.io/numele-repo/
+  - Cloudflare Pages / Vercel: încarci folderul și primești un link.
+
+Observații:
+  - Linkul trebuie să fie https (cele de mai sus sunt).
+  - Linkurile pot include orașul: https://linkul-tau/?oras=Cluj-Napoca (butonul „Distribuie" îl creează).
+  - Dacă deschizi index.html direct din folder (file://), merge și așa, dar doar pe calculatorul tău.
